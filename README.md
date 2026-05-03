@@ -1,26 +1,28 @@
 # Subtitle Sync Agent Helper
 
-A small Python helper for syncing translated `.srt` subtitles against a movie,
-with an agent-friendly workflow: use a synced English subtitle track as the
-timing reference first, keep audio sync as an explicit fallback, and never
-overwrite the original files.
+A small Python script for syncing a translated `.srt` file with a movie. It
+tries a synced English subtitle track as the timing reference first. Audio sync
+is a separate fallback, so you can tell which route produced the output.
+Original files are not overwritten.
 
-## Why This Exists
+## What It Does
 
-`ffsubsync` is excellent, but the best reference is often already inside the
-movie: a perfectly synced English subtitle track. This script automates the
-boring parts around that workflow:
+`ffsubsync` already does the hard alignment work. This script wraps it for the
+common movie-folder case where the video may already contain a synced English
+subtitle track. In that case, the English subtitle is used only as a timing
+reference for the target subtitle, usually a translated one.
 
-- finds the movie in a folder
-- finds the target subtitle, or asks you to disambiguate
-- uses embedded English subtitle timing as the first reference
-- falls back to an external English `.srt` timing reference
-- prints the exact `ffsubsync` command it ran
-- writes a new `_sync.srt` file instead of touching originals
+It handles the surrounding chores:
 
-Audio sync is available, but it is deliberately opt-in. If the subtitle timing
-reference gives a suspicious result, an agent can rerun with audio or create
-small offset variants.
+- find the movie in a folder
+- find the target subtitle, or ask you to disambiguate
+- use embedded English subtitle timing as the first reference
+- fall back to an external English `.srt` timing reference
+- print the exact `ffsubsync` command
+- write a new `_sync.srt` file instead of touching originals
+
+Audio sync is still available. Use it when no synced subtitle reference exists,
+or when the reference subtitle is wrong.
 
 ## Requirements
 
@@ -34,7 +36,7 @@ If `ffsubsync` is missing, the script installs it into:
 ~/.local/share/ffsubsync-venv
 ```
 
-This avoids modifying Homebrew/system Python.
+This leaves Homebrew/system Python alone.
 
 ## Quick Start
 
@@ -48,7 +50,7 @@ If the folder has multiple subtitle files:
 ./sync_subtitle_folder.py "/path/to/movie folder" --subtitle "Movie pt-BR.srt"
 ```
 
-Preview what it would do without creating anything:
+Preview the command without creating anything:
 
 ```sh
 ./sync_subtitle_folder.py "/path/to/movie folder" --dry-run
@@ -56,7 +58,7 @@ Preview what it would do without creating anything:
 
 ## Reference Strategy
 
-Default mode is `subtitle`:
+By default, the script looks for a subtitle timing reference:
 
 ```text
 movie folder
@@ -79,7 +81,7 @@ external synced English .srt?      -> use that .srt as reference
 stop with a clear next command
 ```
 
-To opt into audio sync:
+Use audio sync explicitly:
 
 ```sh
 ./sync_subtitle_folder.py "/path/to/movie folder" \
@@ -87,7 +89,7 @@ To opt into audio sync:
   --reference-mode audio
 ```
 
-To allow automatic audio fallback:
+Allow automatic audio fallback:
 
 ```sh
 ./sync_subtitle_folder.py "/path/to/movie folder" --reference-mode auto
@@ -116,7 +118,7 @@ Create an offset variant after syncing:
   --output "Example pt-BR_sync_minus1.2s.srt"
 ```
 
-Use audio explicitly:
+Sync against audio:
 
 ```sh
 ./sync_subtitle_folder.py "/Movies/Example" \
@@ -139,13 +141,13 @@ folder                 Folder containing the movie and subtitle.
 --reference-mode MODE  subtitle, embedded, external, audio, or auto.
 ```
 
-## Agent Workflow
+## Agent Usage
 
-Use [SKILL.md](SKILL.md) when asking an agent to run this. The skill captures
-the intended loop:
+When asking an agent to run this, point it at [SKILL.md](SKILL.md). The intended
+loop is:
 
 1. Dry-run the folder.
-2. Use `--reference-mode subtitle`, the default subtitle-timing reference route.
+2. Use `--reference-mode subtitle`, which is the default.
 3. Run the sync without overwriting originals.
 4. If the user says it is off, make small offset variants.
 5. If subtitle-reference sync is not enough, rerun with `--reference-mode audio`.
@@ -156,8 +158,9 @@ the intended loop:
 - Only `.srt` subtitles are supported.
 - Language detection uses file names and video metadata; ambiguous folders need
   `--subtitle`, `--video`, or `--all`.
-- The script cannot visually verify sync quality. It can choose references and
-  run `ffsubsync`, but a human or agent still needs to inspect suspicious cases.
+- The script cannot tell whether the result looks right in your player. It can
+  choose references and run `ffsubsync`; you still need to inspect doubtful
+  cases.
 - Embedded subtitle metadata can be wrong. Use `--reference-mode audio` when the
   supposed English timing reference is not actually synced.
 
