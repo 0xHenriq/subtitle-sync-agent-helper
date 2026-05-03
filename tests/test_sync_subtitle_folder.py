@@ -53,6 +53,37 @@ class SubtitleSyncTests(unittest.TestCase):
 
             self.assertIn("different from the original", str(raised.exception))
 
+    def test_report_path_is_folder_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+
+            report_path = sync.resolve_report_path(folder, "sync_report.json")
+
+            self.assertEqual(report_path, (folder / "sync_report.json").resolve())
+
+    def test_report_path_cannot_overwrite_media_or_subtitles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            subtitle = folder / "Movie.pt-BR.srt"
+            output = folder / "Movie.pt-BR_sync.srt"
+            reference = folder / "Movie.eng.srt"
+            for path in (video, subtitle, reference):
+                path.write_text("x\n", encoding="utf-8")
+
+            choice = sync.ReferenceChoice(value=str(reference), label="reference")
+
+            for protected in (video, subtitle, output, reference):
+                with self.subTest(protected=protected.name):
+                    with self.assertRaises(SystemExit):
+                        sync.validate_report_path(
+                            protected,
+                            video,
+                            [subtitle],
+                            [output],
+                            choice,
+                        )
+
     def test_subtitle_reference_mode_does_not_fall_back_to_audio(self):
         original_embedded = sync.find_embedded_subtitle_reference
         original_external = sync.find_external_english_reference
@@ -145,6 +176,61 @@ class SubtitleSyncTests(unittest.TestCase):
         self.assertIn("a:1", command)
         self.assertIn("--vad", command)
         self.assertIn("auditok", command)
+
+    def test_engine_args_are_passed_to_ffsubsync(self):
+        command = sync.build_ffsubsync_command(
+            ffsubsync="/bin/ffsubsync",
+            video=Path("/movies/Movie.mkv"),
+            subtitle=Path("/movies/Movie.pt-BR.srt"),
+            output=Path("/movies/Movie.pt-BR_sync.srt"),
+            reference="stream:s:0",
+            offset=None,
+            engine_args=["--max-offset-seconds", "600", "--gss"],
+        )
+
+        self.assertIn("--max-offset-seconds", command)
+        self.assertIn("600", command)
+        self.assertIn("--gss", command)
+
+    def test_engine_args_cannot_override_wrapper_safety(self):
+        for blocked in ("-i", "-o", "--overwrite-input", "--reference-stream"):
+            with self.subTest(blocked=blocked):
+                with self.assertRaises(SystemExit):
+                    sync.validate_engine_args([blocked])
+
+    def test_explicit_vad_overrides_audio_default(self):
+        command = sync.build_ffsubsync_command(
+            ffsubsync="/bin/ffsubsync",
+            video=Path("/movies/Movie.mkv"),
+            subtitle=Path("/movies/Movie.pt-BR.srt"),
+            output=Path("/movies/Movie.pt-BR_sync.srt"),
+            reference="audio",
+            offset=None,
+            engine_args=["--vad=webrtc"],
+        )
+
+        self.assertIn("--vad=webrtc", command)
+        self.assertNotIn("auditok", command)
+
+    def test_try_harder_adds_recovery_args_without_overriding_user_args(self):
+        args = type(
+            "Args",
+            (),
+            {
+                "engine_arg": [],
+                "gss": False,
+                "max_offset_seconds": 120,
+                "no_fix_framerate": False,
+                "try_harder": True,
+                "vad": None,
+            },
+        )()
+
+        engine_args = sync.collect_engine_args(args)
+
+        self.assertEqual(engine_args.count("--max-offset-seconds"), 1)
+        self.assertIn("120", engine_args)
+        self.assertIn("--gss", engine_args)
 
 
 if __name__ == "__main__":

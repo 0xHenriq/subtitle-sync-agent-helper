@@ -24,6 +24,10 @@ It handles the surrounding chores:
 Audio sync is still available. Use it when no synced subtitle reference exists,
 or when the reference subtitle is wrong.
 
+Hard ffsubsync cases can use the same recovery knobs you would use manually:
+larger max offsets, golden-section framerate search, disabled framerate fixing,
+and alternate voice activity detectors.
+
 ## Requirements
 
 - macOS, Linux, or another environment with Python 3.10+
@@ -55,6 +59,14 @@ Preview the command without creating anything:
 
 ```sh
 ./sync_subtitle_folder.py "/path/to/movie folder" --dry-run
+```
+
+Write a machine-readable plan:
+
+```sh
+./sync_subtitle_folder.py "/path/to/movie folder" \
+  --doctor \
+  --report-json sync_report.json
 ```
 
 ## Reference Strategy
@@ -104,6 +116,56 @@ Allow automatic audio fallback:
 ```sh
 ./sync_subtitle_folder.py "/path/to/movie folder" --reference-mode auto
 ```
+
+## Recovery Strategy
+
+If the first result is still wrong, classify the failure before making another
+file:
+
+- constant early/late shift: use `--offset`
+- gets worse over time: try `--gss` or `--no-fix-framerate`
+- off by more than a minute: try `--max-offset-seconds 600`
+- audio sync fails: try another VAD such as `--vad=webrtc` or `--vad=auditok`
+- reference subtitle is suspicious: choose another `--reference` or use audio
+
+For a slower single-pass recovery profile:
+
+```sh
+./sync_subtitle_folder.py "/Movies/Example" \
+  --subtitle "Example pt-BR.srt" \
+  --reference-mode audio \
+  --try-harder
+```
+
+`--try-harder` adds `--max-offset-seconds 600` and `--gss` unless you already
+supplied those options. Audio mode defaults to `auditok`, but you can switch
+VADs explicitly. You can also pass safe ffsubsync options directly:
+
+```sh
+./sync_subtitle_folder.py "/Movies/Example" \
+  --subtitle "Example pt-BR.srt" \
+  --reference-mode audio \
+  --engine-arg=--strict
+```
+
+The wrapper rejects engine args that would override inputs, outputs, overwrite
+behavior, or reference-stream selection.
+
+## Doctor Reports
+
+`--doctor` prints the selected video, target subtitle, reference, output path,
+and exact `ffsubsync` command without writing a subtitle file. Add
+`--report-json` when an agent or script should consume the plan:
+
+```sh
+./sync_subtitle_folder.py "/Movies/Example" \
+  --subtitle "Example pt-BR.srt" \
+  --doctor \
+  --report-json sync_report.json
+```
+
+The report is a structured execution plan. It does not yet verify playback
+quality or score residual sync.
 
 ## Common Commands
 
@@ -155,6 +217,14 @@ folder                 Folder containing the movie and subtitle.
 --offset OFFSET        Extra offset seconds, for example -1.2.
 --force                Overwrite the chosen output path.
 --dry-run              Print the command without running it.
+--doctor               Print a sync plan and imply --dry-run.
+--report-json PATH     Write a machine-readable sync plan/report JSON file.
+--engine-arg ARG       Pass one safe raw argument to ffsubsync. Repeatable.
+--try-harder           Add --max-offset-seconds 600 and --gss.
+--max-offset-seconds N Pass ffsubsync --max-offset-seconds.
+--no-fix-framerate     Pass ffsubsync --no-fix-framerate.
+--gss                  Pass ffsubsync --gss.
+--vad VAD              Pass ffsubsync --vad when syncing against audio.
 --reference REF        Explicit reference .srt or stream, for example s:0.
 --all                  Sync all non-English subtitle candidates.
 --reference-mode MODE  subtitle, embedded, external, audio, or auto.
@@ -168,9 +238,13 @@ loop is:
 1. Dry-run the folder.
 2. Use `--reference-mode subtitle`, which is the default.
 3. Run the sync without overwriting originals.
-4. If the user says it is off, make small offset variants.
-5. If subtitle-reference sync is not enough, rerun with `--reference-mode audio`.
-6. Always report the final command and output path.
+4. If the user says it is off, classify constant offset versus drift, bad
+   reference, large offset, or audio/VAD failure.
+5. Use `--offset` only for constant early/late errors.
+6. Use `--try-harder`, `--gss`, `--no-fix-framerate`, `--max-offset-seconds`, or
+   `--vad` for known ffsubsync failure modes.
+7. If subtitle-reference sync is not enough, rerun with `--reference-mode audio`.
+8. Always report the final command and output path.
 
 ## Limitations
 

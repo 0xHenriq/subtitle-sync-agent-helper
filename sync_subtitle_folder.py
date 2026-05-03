@@ -18,7 +18,31 @@ from pathlib import Path
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm"}
 SUBTITLE_EXTENSIONS = {".srt"}
 REFERENCE_MODES = ("subtitle", "embedded", "external", "audio", "auto")
+VAD_CHOICES = (
+    "subs_then_webrtc",
+    "webrtc",
+    "subs_then_auditok",
+    "auditok",
+    "subs_then_silero",
+    "silero",
+)
 STREAM_SPEC_PATTERN = re.compile(r"(?:0:)?[as]:\d+")
+TRY_HARDER_MAX_OFFSET_SECONDS = 600
+BLOCKED_ENGINE_OPTIONS = {
+    "-i",
+    "--srtin",
+    "-o",
+    "--srtout",
+    "--overwrite-input",
+    "--reference-stream",
+    "--refstream",
+    "--reference-track",
+    "--reftrack",
+    "--extract-subs-from-stream",
+    "--extract-subtitles-from-stream",
+    "--make-test-case",
+    "--create-test-case",
+}
 GENERATED_MARKERS = (
     "_sync",
     "_engref_sync",
@@ -68,6 +92,48 @@ def quote_command(command: list[str]) -> str:
     return shlex.join(command)
 
 
+def option_name(argument: str) -> str:
+    return argument.split("=", 1)[0]
+
+
+def has_engine_option(engine_args: list[str], option: str) -> bool:
+    return any(option_name(argument) == option for argument in engine_args)
+
+
+def validate_engine_args(engine_args: list[str]) -> None:
+    for argument in engine_args:
+        if option_name(argument) in BLOCKED_ENGINE_OPTIONS:
+            raise SystemExit(
+                f"Do not pass {option_name(argument)} through --engine-arg; "
+                "the wrapper controls inputs, outputs, and reference selection."
+            )
+
+
+def collect_engine_args(args: argparse.Namespace) -> list[str]:
+    engine_args: list[str] = []
+
+    if args.max_offset_seconds is not None:
+        engine_args.extend(["--max-offset-seconds", str(args.max_offset_seconds)])
+    if args.no_fix_framerate:
+        engine_args.append("--no-fix-framerate")
+    if args.gss:
+        engine_args.append("--gss")
+    if args.vad:
+        engine_args.extend(["--vad", args.vad])
+    engine_args.extend(args.engine_arg or [])
+
+    if args.try_harder:
+        if not has_engine_option(engine_args, "--max-offset-seconds"):
+            engine_args.extend(
+                ["--max-offset-seconds", str(TRY_HARDER_MAX_OFFSET_SECONDS)]
+            )
+        if not has_engine_option(engine_args, "--gss"):
+            engine_args.append("--gss")
+
+    validate_engine_args(engine_args)
+    return engine_args
+
+
 def resolve_in_folder(folder: Path, value: str | None) -> Path | None:
     if not value:
         return None
@@ -75,6 +141,32 @@ def resolve_in_folder(folder: Path, value: str | None) -> Path | None:
     if not path.is_absolute():
         path = folder / path
     return path.resolve()
+
+
+def resolve_report_path(folder: Path, value: str | None) -> Path | None:
+    if not value:
+        return None
+    return resolve_in_folder(folder, value)
+
+
+def validate_report_path(
+    report_path: Path | None,
+    video: Path,
+    subtitles: list[Path],
+    outputs: list[Path],
+    reference: ReferenceChoice,
+) -> None:
+    if not report_path:
+        return
+
+    protected_paths = {video.resolve()}
+    protected_paths.update(subtitle.resolve() for subtitle in subtitles)
+    protected_paths.update(output.resolve() for output in outputs)
+    if not reference.value.startswith("stream:") and reference.value != "audio":
+        protected_paths.add(Path(reference.value).resolve())
+
+    if report_path.resolve() in protected_paths:
+        raise SystemExit("Report JSON path must be different from media and subtitle files.")
 
 
 def tokens_for(path: Path) -> set[str]:
@@ -361,8 +453,10 @@ def build_ffsubsync_command(
     output: Path,
     reference: str,
     offset: float | None,
+    engine_args: list[str] | None = None,
 ) -> list[str]:
     command: list[str]
+    engine_args = engine_args or []
 
     if reference.startswith("stream:"):
         stream = reference.split(":", 1)[1]
@@ -372,8 +466,9 @@ def build_ffsubsync_command(
             "--reference-stream",
             stream,
         ]
-        if is_audio_stream(stream):
+        if is_audio_stream(stream) and not has_engine_option(engine_args, "--vad"):
             command.extend(["--vad", "auditok"])
+        command.extend(engine_args)
         command.extend(
             [
                 "-i",
@@ -388,17 +483,16 @@ def build_ffsubsync_command(
             str(video),
             "--reference-stream",
             "a:0",
-            "--vad",
-            "auditok",
-            "-i",
-            str(subtitle),
-            "-o",
-            str(output),
         ]
+        if not has_engine_option(engine_args, "--vad"):
+            command.extend(["--vad", "auditok"])
+        command.extend(engine_args)
+        command.extend(["-i", str(subtitle), "-o", str(output)])
     else:
         command = [
             ffsubsync,
             reference,
+            *engine_args,
             "-i",
             str(subtitle),
             "-o",
@@ -427,6 +521,52 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="Overwrite the chosen output path if it exists.")
     parser.add_argument("--dry-run", action="store_true", help="Print the command without running it.")
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Print a sync plan and exit without writing subtitles. Implies --dry-run.",
+    )
+    parser.add_argument(
+        "--report-json",
+        help="Write a machine-readable sync plan/report JSON file.",
+    )
+    parser.add_argument(
+        "--engine-arg",
+        action="append",
+        default=[],
+        help=(
+            "Pass one safe extra argument to ffsubsync. Repeat as needed. "
+            "Use --engine-arg=--gss for arguments that start with '-'."
+        ),
+    )
+    parser.add_argument(
+        "--try-harder",
+        action="store_true",
+        help=(
+            "Add a slower recovery profile: --max-offset-seconds 600 and --gss, "
+            "unless already supplied."
+        ),
+    )
+    parser.add_argument(
+        "--max-offset-seconds",
+        type=float,
+        help="Pass ffsubsync --max-offset-seconds for subtitles that may be far off.",
+    )
+    parser.add_argument(
+        "--no-fix-framerate",
+        action="store_true",
+        help="Pass ffsubsync --no-fix-framerate when framerate correction seems harmful.",
+    )
+    parser.add_argument(
+        "--gss",
+        action="store_true",
+        help="Pass ffsubsync --gss for slower golden-section framerate-ratio search.",
+    )
+    parser.add_argument(
+        "--vad",
+        choices=VAD_CHOICES,
+        help="Pass ffsubsync --vad when syncing against audio.",
+    )
+    parser.add_argument(
         "--reference",
         help="Explicit reference .srt filename/path or ffmpeg stream spec, e.g. s:0.",
     )
@@ -449,12 +589,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.doctor:
+        args.dry_run = True
+
     folder = Path(args.folder).expanduser().resolve()
     if not folder.is_dir():
         raise SystemExit(f"Folder not found: {folder}")
 
     ensure_executable("ffmpeg")
     ffsubsync = ensure_ffsubsync()
+    engine_args = collect_engine_args(args)
 
     video = find_video(folder, args.video)
     subtitles = find_target_subtitles(folder, args.subtitle, args.all)
@@ -472,10 +616,30 @@ def main() -> int:
         mode=args.reference_mode,
         explicit_reference=args.reference,
     )
+    report_path = resolve_report_path(folder, args.report_json)
+    validate_report_path(report_path, video, subtitles, outputs, reference)
+    report = {
+        "folder": str(folder),
+        "video": str(video),
+        "reference": {
+            "label": reference.label,
+            "value": reference.value,
+            "mode": args.reference_mode,
+            "explicit": args.reference,
+        },
+        "engine_args": engine_args,
+        "try_harder": args.try_harder,
+        "doctor": args.doctor,
+        "dry_run": args.dry_run,
+        "originals_preserved": True,
+        "targets": [],
+    }
 
     print(f"Folder: {folder}")
     print(f"Video: {video}")
     print(f"Reference: {reference.label}")
+    if args.doctor:
+        print("Doctor: plan only; no subtitle output will be written.")
     for subtitle, output in zip(subtitles, outputs):
         command = build_ffsubsync_command(
             ffsubsync=ffsubsync,
@@ -484,15 +648,28 @@ def main() -> int:
             output=output,
             reference=reference.value,
             offset=args.offset,
+            engine_args=engine_args,
         )
 
         print(f"Target subtitle: {subtitle}")
         print(f"Output: {output}")
         print(f"Command: {quote_command(command)}")
+        report["targets"].append(
+            {
+                "subtitle": str(subtitle),
+                "output": str(output),
+                "command": command,
+                "status": "planned" if args.dry_run else "pending",
+            }
+        )
 
         if not args.dry_run:
             run(command)
+            report["targets"][-1]["status"] = "done"
             print(f"Done: {output}")
+    if report_path:
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(f"Report: {report_path}")
     return 0
 
 
