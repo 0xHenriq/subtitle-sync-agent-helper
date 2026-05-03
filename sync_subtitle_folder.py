@@ -168,6 +168,9 @@ def make_output_path(subtitle: Path, suffix: str, explicit: str | None, force: b
     else:
         output = subtitle.with_name(f"{subtitle.stem}{suffix}{subtitle.suffix}")
 
+    if output.resolve() == subtitle.resolve():
+        raise SystemExit("Output subtitle must be different from the original subtitle.")
+
     if force or not output.exists():
         return output
 
@@ -346,8 +349,8 @@ def select_reference(
 
     raise SystemExit(
         "No synced subtitle timing reference found. "
-        "Run again with --reference-mode audio to sync against audio, "
-        "or --reference-mode auto to allow audio fallback automatically."
+        "Run again with --reference s:N or --reference reference.srt if you know the right reference, "
+        "or use --reference-mode audio to sync against audio."
     )
 
 
@@ -457,6 +460,10 @@ def main() -> int:
     subtitles = find_target_subtitles(folder, args.subtitle, args.all)
     if args.output and len(subtitles) > 1:
         raise SystemExit("--output can only be used when syncing one subtitle.")
+    outputs = [
+        make_output_path(subtitle, args.suffix, args.output, args.force)
+        for subtitle in subtitles
+    ]
 
     reference = select_reference(
         video=video,
@@ -469,8 +476,7 @@ def main() -> int:
     print(f"Folder: {folder}")
     print(f"Video: {video}")
     print(f"Reference: {reference.label}")
-    for subtitle in subtitles:
-        output = make_output_path(subtitle, args.suffix, args.output, args.force)
+    for subtitle, output in zip(subtitles, outputs):
         command = build_ffsubsync_command(
             ffsubsync=ffsubsync,
             video=video,

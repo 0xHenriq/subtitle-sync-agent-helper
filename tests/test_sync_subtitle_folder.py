@@ -43,6 +43,16 @@ class SubtitleSyncTests(unittest.TestCase):
             output = sync.make_output_path(subtitle, "_sync", explicit=None, force=False)
             self.assertEqual(output.name, "Movie.pt-BR_sync_2.srt")
 
+    def test_output_path_cannot_be_original_even_with_force(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subtitle = Path(tmp) / "Movie.pt-BR.srt"
+            subtitle.write_text("1\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as raised:
+                sync.make_output_path(subtitle, "_sync", explicit=str(subtitle), force=True)
+
+            self.assertIn("different from the original", str(raised.exception))
+
     def test_subtitle_reference_mode_does_not_fall_back_to_audio(self):
         original_embedded = sync.find_embedded_subtitle_reference
         original_external = sync.find_external_english_reference
@@ -56,6 +66,7 @@ class SubtitleSyncTests(unittest.TestCase):
                     subtitles=[Path("Movie.pt-BR.srt")],
                     mode="subtitle",
                 )
+            self.assertIn("--reference s:N", str(raised.exception))
             self.assertIn("--reference-mode audio", str(raised.exception))
 
             choice = sync.select_reference(
