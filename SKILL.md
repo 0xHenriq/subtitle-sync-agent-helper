@@ -23,9 +23,11 @@ strategy, interpreting results, and reporting exact commands.
    - uses embedded English subtitle timing as the first reference for the target subtitle
    - then tries an external English `.srt` timing reference
    - stops before audio fallback
-5. Never modify the original video or subtitle. Let the script write `_sync.srt`
+5. If the right reference is known but not auto-detected, pass it explicitly:
+   `--reference s:0` for a stream or `--reference "Movie eng.srt"` for a file.
+6. Never modify the original video or subtitle. Let the script write `_sync.srt`
    or pass an explicit `--output`.
-6. Report the output path and exact command.
+7. Report the output path and exact command.
 
 ## When The User Says It Is Still Off
 

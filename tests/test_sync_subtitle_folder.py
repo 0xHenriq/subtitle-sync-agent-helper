@@ -44,9 +44,9 @@ class SubtitleSyncTests(unittest.TestCase):
             self.assertEqual(output.name, "Movie.pt-BR_sync_2.srt")
 
     def test_subtitle_reference_mode_does_not_fall_back_to_audio(self):
-        original_embedded = sync.find_embedded_english_subtitle
+        original_embedded = sync.find_embedded_subtitle_reference
         original_external = sync.find_external_english_reference
-        sync.find_embedded_english_subtitle = lambda video: None
+        sync.find_embedded_subtitle_reference = lambda video, require_english: None
         sync.find_external_english_reference = lambda folder, targets: None
         try:
             with self.assertRaises(SystemExit) as raised:
@@ -66,8 +66,43 @@ class SubtitleSyncTests(unittest.TestCase):
             )
             self.assertEqual(choice.value, "audio")
         finally:
-            sync.find_embedded_english_subtitle = original_embedded
+            sync.find_embedded_subtitle_reference = original_embedded
             sync.find_external_english_reference = original_external
+
+    def test_embedded_english_detection_uses_specific_metadata(self):
+        english_stream = {"tags": {"language": "eng", "title": "English"}}
+        english_title_stream = {"tags": {"title": "English / SDH"}}
+        noisy_stream = {"tags": {"title": "engineering notes"}}
+
+        self.assertIsNotNone(sync.embedded_subtitle_english_reason(english_stream))
+        self.assertIsNotNone(sync.embedded_subtitle_english_reason(english_title_stream))
+        self.assertIsNone(sync.embedded_subtitle_english_reason(noisy_stream))
+
+    def test_unknown_single_embedded_stream_requires_embedded_mode(self):
+        original_streams = sync.ffprobe_streams
+        sync.ffprobe_streams = lambda video: [{"codec_type": "subtitle", "tags": {"title": "Forced"}}]
+        try:
+            self.assertIsNone(sync.find_embedded_subtitle_reference(Path("movie.mkv"), require_english=True))
+            self.assertEqual(
+                sync.find_embedded_subtitle_reference(Path("movie.mkv"), require_english=False),
+                ("s:0", "only embedded subtitle stream"),
+            )
+        finally:
+            sync.ffprobe_streams = original_streams
+
+    def test_explicit_reference_accepts_stream_or_external_srt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            reference = folder / "Movie.eng.srt"
+            target = folder / "Movie.pt-BR.srt"
+            reference.write_text("1\n", encoding="utf-8")
+            target.write_text("1\n", encoding="utf-8")
+
+            stream_choice = sync.resolve_explicit_reference(folder, "s:0", [target])
+            file_choice = sync.resolve_explicit_reference(folder, "Movie.eng.srt", [target])
+
+            self.assertEqual(stream_choice.value, "stream:s:0")
+            self.assertEqual(file_choice.value, str(reference.resolve()))
 
     def test_embedded_english_reference_builds_ffsubsync_command(self):
         command = sync.build_ffsubsync_command(
@@ -75,7 +110,7 @@ class SubtitleSyncTests(unittest.TestCase):
             video=Path("/movies/Movie.mkv"),
             subtitle=Path("/movies/Movie.pt-BR.srt"),
             output=Path("/movies/Movie.pt-BR_sync.srt"),
-            reference="embedded:s:0",
+            reference="stream:s:0",
             offset=-1.2,
         )
 
@@ -84,6 +119,21 @@ class SubtitleSyncTests(unittest.TestCase):
         self.assertIn("s:0", command)
         self.assertIn("--apply-offset-seconds", command)
         self.assertIn("-1.2", command)
+
+    def test_audio_stream_reference_uses_auditok(self):
+        command = sync.build_ffsubsync_command(
+            ffsubsync="/bin/ffsubsync",
+            video=Path("/movies/Movie.mkv"),
+            subtitle=Path("/movies/Movie.pt-BR.srt"),
+            output=Path("/movies/Movie.pt-BR_sync.srt"),
+            reference="stream:a:1",
+            offset=None,
+        )
+
+        self.assertIn("--reference-stream", command)
+        self.assertIn("a:1", command)
+        self.assertIn("--vad", command)
+        self.assertIn("auditok", command)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ or when the reference subtitle is wrong.
 
 ## Requirements
 
-- macOS, Linux, or another environment with Python 3
+- macOS, Linux, or another environment with Python 3.10+
 - `ffmpeg` and `ffprobe` on `PATH`
 - `ffsubsync`
 
@@ -36,7 +36,8 @@ If `ffsubsync` is missing, the script installs it into:
 ~/.local/share/ffsubsync-venv
 ```
 
-This leaves Homebrew/system Python alone.
+This leaves Homebrew/system Python alone. The install step still needs Python's
+`venv` module, pip, and access to PyPI.
 
 ## Quick Start
 
@@ -81,6 +82,15 @@ external synced English .srt?      -> use that .srt as reference
 stop with a clear next command
 ```
 
+If the video has an unlabeled subtitle stream and you know it is the right
+reference, choose it explicitly:
+
+```sh
+./sync_subtitle_folder.py "/path/to/movie folder" \
+  --subtitle "Movie pt-BR.srt" \
+  --reference s:0
+```
+
 Use audio sync explicitly:
 
 ```sh
@@ -107,6 +117,14 @@ Sync all non-English subtitle candidates:
 
 ```sh
 ./sync_subtitle_folder.py "/Movies/Example" --all
+```
+
+Use a specific reference file:
+
+```sh
+./sync_subtitle_folder.py "/Movies/Example" \
+  --subtitle "Example pt-BR.srt" \
+  --reference "Example eng.srt"
 ```
 
 Create an offset variant after syncing:
@@ -137,6 +155,7 @@ folder                 Folder containing the movie and subtitle.
 --offset OFFSET        Extra offset seconds, for example -1.2.
 --force                Overwrite the chosen output path.
 --dry-run              Print the command without running it.
+--reference REF        Explicit reference .srt or stream, for example s:0.
 --all                  Sync all non-English subtitle candidates.
 --reference-mode MODE  subtitle, embedded, external, audio, or auto.
 ```
@@ -156,8 +175,8 @@ loop is:
 ## Limitations
 
 - Only `.srt` subtitles are supported.
-- Language detection uses file names and video metadata; ambiguous folders need
-  `--subtitle`, `--video`, or `--all`.
+- Language detection uses file names and video metadata. Ambiguous folders need
+  `--subtitle`, `--video`, `--reference`, or `--all`.
 - The script cannot tell whether the result looks right in your player. It can
   choose references and run `ffsubsync`; you still need to inspect doubtful
   cases.

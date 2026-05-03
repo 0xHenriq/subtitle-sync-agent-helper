@@ -18,6 +18,7 @@ from pathlib import Path
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm"}
 SUBTITLE_EXTENSIONS = {".srt"}
 REFERENCE_MODES = ("subtitle", "embedded", "external", "audio", "auto")
+STREAM_SPEC_PATTERN = re.compile(r"(?:0:)?[as]:\d+")
 GENERATED_MARKERS = (
     "_sync",
     "_engref_sync",
@@ -77,7 +78,11 @@ def resolve_in_folder(folder: Path, value: str | None) -> Path | None:
 
 
 def tokens_for(path: Path) -> set[str]:
-    return {token for token in re.split(r"[^a-z0-9]+", path.stem.lower()) if token}
+    return tokens_for_text(path.stem)
+
+
+def tokens_for_text(text: str) -> set[str]:
+    return {token for token in re.split(r"[^a-z0-9]+", text.lower()) if token}
 
 
 def looks_english(path: Path) -> bool:
@@ -218,17 +223,22 @@ def ffprobe_streams(video: Path) -> list[dict]:
     return json.loads(result.stdout).get("streams", [])
 
 
-def stream_text(stream: dict) -> str:
+def embedded_subtitle_english_reason(stream: dict) -> str | None:
     tags = stream.get("tags", {}) or {}
-    pieces = [
-        str(tags.get("language", "")),
-        str(tags.get("title", "")),
-        str(tags.get("handler_name", "")),
-    ]
-    return " ".join(pieces).lower()
+    language = str(tags.get("language", "")).strip().lower()
+    title_tokens = tokens_for_text(str(tags.get("title", "")))
+    handler_tokens = tokens_for_text(str(tags.get("handler_name", "")))
+
+    if language in {"en", "eng", "english"}:
+        return f"language metadata matched {language}"
+    if "english" in title_tokens or "eng" in title_tokens:
+        return "title metadata matched English"
+    if "english" in handler_tokens or "eng" in handler_tokens:
+        return "handler metadata matched English"
+    return None
 
 
-def find_embedded_english_subtitle(video: Path) -> tuple[str, str] | None:
+def find_embedded_subtitle_reference(video: Path, *, require_english: bool) -> tuple[str, str] | None:
     subtitle_number = 0
     fallback_if_single: tuple[str, str] | None = None
     count = 0
@@ -241,15 +251,19 @@ def find_embedded_english_subtitle(video: Path) -> tuple[str, str] | None:
         subtitle_number += 1
         count += 1
 
-        text = stream_text(stream)
-        if "eng" in text or "english" in text or re.search(r"\ben\b", text):
-            return reference_stream, "metadata matched English"
+        english_reason = embedded_subtitle_english_reason(stream)
+        if english_reason:
+            return reference_stream, english_reason
 
         fallback_if_single = reference_stream, "only embedded subtitle stream"
 
-    if count == 1:
+    if count == 1 and not require_english:
         return fallback_if_single
     return None
+
+
+def find_embedded_english_subtitle(video: Path) -> tuple[str, str] | None:
+    return find_embedded_subtitle_reference(video, require_english=True)
 
 
 def find_external_english_reference(folder: Path, targets: list[Path]) -> Path | None:
@@ -271,32 +285,61 @@ def find_external_english_reference(folder: Path, targets: list[Path]) -> Path |
     return None
 
 
+def is_stream_spec(value: str) -> bool:
+    return STREAM_SPEC_PATTERN.fullmatch(value) is not None
+
+
+def is_audio_stream(reference: str) -> bool:
+    return reference.startswith("a:") or reference.startswith("0:a:")
+
+
+def resolve_explicit_reference(folder: Path, reference: str, targets: list[Path]) -> ReferenceChoice:
+    if is_stream_spec(reference):
+        return ReferenceChoice(value=f"stream:{reference}", label=f"explicit stream {reference}")
+
+    reference_path = resolve_in_folder(folder, reference)
+    if not reference_path or not reference_path.exists():
+        raise SystemExit(f"Reference not found: {reference_path or reference}")
+    if reference_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
+        raise SystemExit(f"Only .srt reference files are supported: {reference_path}")
+    if reference_path.resolve() in {target.resolve() for target in targets}:
+        raise SystemExit("Reference subtitle must be different from the target subtitle.")
+    return ReferenceChoice(value=str(reference_path), label=f"explicit subtitle {reference_path}")
+
+
 def select_reference(
     video: Path,
     folder: Path,
     subtitles: list[Path],
     mode: str,
+    explicit_reference: str | None = None,
 ) -> ReferenceChoice:
+    if explicit_reference:
+        return resolve_explicit_reference(folder, explicit_reference, subtitles)
+
     if mode not in REFERENCE_MODES:
         raise SystemExit(f"Unknown reference mode: {mode}")
 
     if mode in {"subtitle", "embedded", "auto"}:
-        embedded = find_embedded_english_subtitle(video)
+        embedded = find_embedded_subtitle_reference(video, require_english=(mode != "embedded"))
         if embedded:
             stream, reason = embedded
             return ReferenceChoice(
-                value=f"embedded:{stream}",
+                value=f"stream:{stream}",
                 label=f"embedded subtitle stream {stream} ({reason})",
             )
         if mode == "embedded":
-            raise SystemExit("No embedded English subtitle reference found.")
+            raise SystemExit(
+                "No usable embedded subtitle reference found. "
+                "Pass --reference s:N to choose a stream explicitly."
+            )
 
     if mode in {"subtitle", "external", "auto"}:
         external = find_external_english_reference(folder, subtitles)
         if external:
             return ReferenceChoice(value=str(external), label=f"external subtitle {external}")
         if mode == "external":
-            raise SystemExit("No external English .srt reference found.")
+            raise SystemExit("No unambiguous external English .srt reference found.")
 
     if mode in {"audio", "auto"}:
         return ReferenceChoice(value="audio", label="audio stream a:0")
@@ -318,18 +361,24 @@ def build_ffsubsync_command(
 ) -> list[str]:
     command: list[str]
 
-    if reference.startswith("embedded:"):
+    if reference.startswith("stream:"):
         stream = reference.split(":", 1)[1]
         command = [
             ffsubsync,
             str(video),
             "--reference-stream",
             stream,
-            "-i",
-            str(subtitle),
-            "-o",
-            str(output),
         ]
+        if is_audio_stream(stream):
+            command.extend(["--vad", "auditok"])
+        command.extend(
+            [
+                "-i",
+                str(subtitle),
+                "-o",
+                str(output),
+            ]
+        )
     elif reference == "audio":
         command = [
             ffsubsync,
@@ -375,6 +424,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="Overwrite the chosen output path if it exists.")
     parser.add_argument("--dry-run", action="store_true", help="Print the command without running it.")
     parser.add_argument(
+        "--reference",
+        help="Explicit reference .srt filename/path or ffmpeg stream spec, e.g. s:0.",
+    )
+    parser.add_argument(
         "--reference-mode",
         choices=REFERENCE_MODES,
         default="subtitle",
@@ -410,6 +463,7 @@ def main() -> int:
         folder=folder,
         subtitles=subtitles,
         mode=args.reference_mode,
+        explicit_reference=args.reference,
     )
 
     print(f"Folder: {folder}")
