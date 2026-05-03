@@ -43,7 +43,7 @@ class SubtitleSyncTests(unittest.TestCase):
             output = sync.make_output_path(subtitle, "_sync", explicit=None, force=False)
             self.assertEqual(output.name, "Movie.pt-BR_sync_2.srt")
 
-    def test_english_first_does_not_fall_back_to_audio(self):
+    def test_subtitle_reference_mode_does_not_fall_back_to_audio(self):
         original_embedded = sync.find_embedded_english_subtitle
         original_external = sync.find_external_english_reference
         sync.find_embedded_english_subtitle = lambda video: None
@@ -54,7 +54,7 @@ class SubtitleSyncTests(unittest.TestCase):
                     video=Path("movie.mkv"),
                     folder=Path("."),
                     subtitles=[Path("Movie.pt-BR.srt")],
-                    mode="english-first",
+                    mode="subtitle",
                 )
             self.assertIn("--reference-mode audio", str(raised.exception))
 

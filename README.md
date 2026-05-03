@@ -1,8 +1,9 @@
 # Subtitle Sync Agent Helper
 
 A small Python helper for syncing translated `.srt` subtitles against a movie,
-with an agent-friendly workflow: try synced English subtitles first, keep audio
-sync as an explicit fallback, and never overwrite the original files.
+with an agent-friendly workflow: use a synced English subtitle track as the
+timing reference first, keep audio sync as an explicit fallback, and never
+overwrite the original files.
 
 ## Why This Exists
 
@@ -12,14 +13,14 @@ boring parts around that workflow:
 
 - finds the movie in a folder
 - finds the target subtitle, or asks you to disambiguate
-- prefers embedded English subtitles
-- falls back to external English `.srt` files
+- uses embedded English subtitle timing as the first reference
+- falls back to an external English `.srt` timing reference
 - prints the exact `ffsubsync` command it ran
 - writes a new `_sync.srt` file instead of touching originals
 
-Audio sync is available, but it is deliberately opt-in. If the English subtitle
-route gives a suspicious result, an agent can rerun with audio or create small
-offset variants.
+Audio sync is available, but it is deliberately opt-in. If the subtitle timing
+reference gives a suspicious result, an agent can rerun with audio or create
+small offset variants.
 
 ## Requirements
 
@@ -55,7 +56,7 @@ Preview what it would do without creating anything:
 
 ## Reference Strategy
 
-Default mode is `english-first`:
+Default mode is `subtitle`:
 
 ```text
 movie folder
@@ -67,11 +68,11 @@ largest video file
 target .srt
     |
     v
-embedded English subtitle?  -> use --reference-stream s:N
+embedded synced English subtitle?  -> use --reference-stream s:N
     |
     no
     v
-external English .srt?      -> use that .srt as reference
+external synced English .srt?      -> use that .srt as reference
     |
     no
     v
@@ -135,7 +136,7 @@ folder                 Folder containing the movie and subtitle.
 --force                Overwrite the chosen output path.
 --dry-run              Print the command without running it.
 --all                  Sync all non-English subtitle candidates.
---reference-mode MODE  english-first, embedded, external, audio, or auto.
+--reference-mode MODE  subtitle, embedded, external, audio, or auto.
 ```
 
 ## Agent Workflow
@@ -144,7 +145,7 @@ Use [SKILL.md](SKILL.md) when asking an agent to run this. The skill captures
 the intended loop:
 
 1. Dry-run the folder.
-2. Prefer `english-first`.
+2. Use `--reference-mode subtitle`, the default subtitle-timing reference route.
 3. Run the sync without overwriting originals.
 4. If the user says it is off, make small offset variants.
 5. If subtitle-reference sync is not enough, rerun with `--reference-mode audio`.
@@ -158,7 +159,7 @@ the intended loop:
 - The script cannot visually verify sync quality. It can choose references and
   run `ffsubsync`, but a human or agent still needs to inspect suspicious cases.
 - Embedded subtitle metadata can be wrong. Use `--reference-mode audio` when the
-  English subtitle track is not actually synced.
+  supposed English timing reference is not actually synced.
 
 ## Development
 

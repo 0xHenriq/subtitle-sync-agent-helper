@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync a subtitle in a movie folder, preferring English subtitles as reference."""
+"""Sync a subtitle in a movie folder using subtitle timing references first."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm"}
 SUBTITLE_EXTENSIONS = {".srt"}
-REFERENCE_MODES = ("english-first", "embedded", "external", "audio", "auto")
+REFERENCE_MODES = ("subtitle", "embedded", "external", "audio", "auto")
 GENERATED_MARKERS = (
     "_sync",
     "_engref_sync",
@@ -280,7 +280,7 @@ def select_reference(
     if mode not in REFERENCE_MODES:
         raise SystemExit(f"Unknown reference mode: {mode}")
 
-    if mode in {"english-first", "embedded", "auto"}:
+    if mode in {"subtitle", "embedded", "auto"}:
         embedded = find_embedded_english_subtitle(video)
         if embedded:
             stream, reason = embedded
@@ -291,7 +291,7 @@ def select_reference(
         if mode == "embedded":
             raise SystemExit("No embedded English subtitle reference found.")
 
-    if mode in {"english-first", "external", "auto"}:
+    if mode in {"subtitle", "external", "auto"}:
         external = find_external_english_reference(folder, subtitles)
         if external:
             return ReferenceChoice(value=str(external), label=f"external subtitle {external}")
@@ -302,7 +302,7 @@ def select_reference(
         return ReferenceChoice(value="audio", label="audio stream a:0")
 
     raise SystemExit(
-        "No English subtitle reference found. "
+        "No synced subtitle timing reference found. "
         "Run again with --reference-mode audio to sync against audio, "
         "or --reference-mode auto to allow audio fallback automatically."
     )
@@ -362,8 +362,8 @@ def build_ffsubsync_command(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Sync one subtitle in a movie folder. Prefers embedded English "
-            "subtitles, then external English .srt files. Audio sync is explicit."
+            "Sync one subtitle in a movie folder. Uses embedded/external English "
+            "subtitles as timing references before explicit audio sync."
         )
     )
     parser.add_argument("folder", help="Folder containing the movie and subtitle.")
@@ -377,10 +377,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reference-mode",
         choices=REFERENCE_MODES,
-        default="english-first",
+        default="subtitle",
         help=(
-            "Reference selection strategy. Default: english-first, which tries "
-            "embedded/external English subtitles and stops before audio fallback."
+            "Reference selection strategy. Default: subtitle, which tries "
+            "embedded/external subtitle timing references and stops before audio fallback."
         ),
     )
     parser.add_argument(

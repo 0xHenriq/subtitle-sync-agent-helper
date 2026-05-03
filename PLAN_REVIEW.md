@@ -9,9 +9,9 @@ Create a tiny GitHub repo for the subtitle sync helper:
 - SKILL.md
 
 Agent workflow:
-- first try embedded English subtitles
-- then external English .srt
-- then audio sync
+- first use embedded English subtitles as the timing reference
+- then use an external English .srt as the timing reference
+- then try audio sync only as a separate fallback
 - if the user says it is still off, generate offset variants
 - never overwrite originals
 - always show the final command and output path
@@ -22,8 +22,8 @@ Agent workflow:
 **Change**
 
 ```diff
-- Default workflow: embedded English -> external English -> audio sync
-+ Default workflow: embedded English -> external English -> stop with guidance
++ Default workflow: embedded English timing reference -> external English timing
++ reference -> stop with guidance
 + Explicit fallback: --reference-mode audio
 + Automatic fallback, when desired: --reference-mode auto
 ```
@@ -31,15 +31,16 @@ Agent workflow:
 **Rationale**
 
 Audio-based sync is slower and can be less predictable than subtitle-to-subtitle
-sync when a known-good English subtitle exists. The user intent is also
-iterative: try English first, inspect, then decide whether to try audio.
+sync when a known-good English subtitle timing reference exists. The user
+intent is also iterative: try subtitle timing first, inspect, then decide
+whether to try audio.
 Silently falling through to audio makes it harder to reason about which method
 produced the file.
 
 **Implementation**
 
-Added `--reference-mode` with `english-first`, `embedded`, `external`, `audio`,
-and `auto`. The default is now `english-first`.
+Added `--reference-mode` with `subtitle`, `embedded`, `external`, `audio`,
+and `auto`. The default is now `subtitle`.
 
 ## Revision 2: Keep A Deterministic Script Under The Agent Workflow
 
@@ -154,8 +155,8 @@ fallback paths.
 | `ffsubsync` missing | Script installs it into a dedicated user venv. |
 | Multiple target subtitles | Script asks for `--subtitle` or `--all`. |
 | Existing `_sync.srt` output | Script creates `_sync_2.srt` unless `--force` is passed. |
-| No English subtitle reference | Default mode stops and suggests `--reference-mode audio` or `auto`. |
-| Bad embedded English metadata | User can force `--reference-mode external` or `audio`. |
+| No synced subtitle timing reference | Default mode stops and suggests `--reference-mode audio` or `auto`. |
+| Bad embedded subtitle metadata | User can force `--reference-mode external` or `audio`. |
 
 ## Test Diagram
 
@@ -173,8 +174,8 @@ folder
   |     +-- ambiguous -> stop
   |
   +-- reference selection
-        +-- embedded English
-        +-- external English
+        +-- embedded English timing reference
+        +-- external English timing reference
         +-- audio, only if explicit/auto
         +-- none -> stop
 ```

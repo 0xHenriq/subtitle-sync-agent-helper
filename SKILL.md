@@ -1,6 +1,6 @@
 ---
 name: subtitle-sync-agent-helper
-description: Use when a user asks an agent to sync translated subtitles with a movie folder, especially when the movie may already contain synced English subtitles. Helps run sync_subtitle_folder.py, prefer English subtitle references, create offset variants, and avoid modifying originals.
+description: Use when a user asks an agent to sync translated subtitles with a movie folder, especially when the movie may contain a synced English subtitle track that should be used as the timing reference. Helps run sync_subtitle_folder.py, use subtitle timing references, create offset variants, and avoid modifying originals.
 ---
 
 # Subtitle Sync Agent Helper
@@ -19,9 +19,9 @@ strategy, interpreting results, and reporting exact commands.
    ```
 
 3. If the folder is ambiguous, rerun with `--subtitle`, `--video`, or `--all`.
-4. Run the default sync first. It uses `--reference-mode english-first`, which:
-   - prefers embedded English subtitle streams
-   - then tries external English `.srt` references
+4. Run the default sync first. It uses `--reference-mode subtitle`, which:
+   - uses embedded English subtitle timing as the first reference for the target subtitle
+   - then tries an external English `.srt` timing reference
    - stops before audio fallback
 5. Never modify the original video or subtitle. Let the script write `_sync.srt`
    or pass an explicit `--output`.
@@ -45,8 +45,8 @@ earlier.
 
 Use audio sync only when:
 
-- no English subtitle reference exists
-- the English subtitle track is known to be bad
+- no synced English subtitle timing reference exists
+- the English subtitle timing reference is known to be bad
 - the user explicitly asks to try audio
 
 Command pattern:
