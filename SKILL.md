@@ -1,0 +1,68 @@
+---
+name: subtitle-sync-agent-helper
+description: Use when a user asks an agent to sync translated subtitles with a movie folder, especially when the movie may already contain synced English subtitles. Helps run sync_subtitle_folder.py, prefer English subtitle references, create offset variants, and avoid modifying originals.
+---
+
+# Subtitle Sync Agent Helper
+
+Use the local `sync_subtitle_folder.py` script as the deterministic executor.
+Keep the agent work focused on selecting files, choosing the next reference
+strategy, interpreting results, and reporting exact commands.
+
+## Workflow
+
+1. Identify the movie folder, target subtitle, and video.
+2. Run a dry run first:
+
+   ```sh
+   ./sync_subtitle_folder.py "/path/to/movie folder" --dry-run
+   ```
+
+3. If the folder is ambiguous, rerun with `--subtitle`, `--video`, or `--all`.
+4. Run the default sync first. It uses `--reference-mode english-first`, which:
+   - prefers embedded English subtitle streams
+   - then tries external English `.srt` references
+   - stops before audio fallback
+5. Never modify the original video or subtitle. Let the script write `_sync.srt`
+   or pass an explicit `--output`.
+6. Report the output path and exact command.
+
+## When The User Says It Is Still Off
+
+Prefer reversible follow-up files:
+
+```sh
+./sync_subtitle_folder.py "/path/to/movie folder" \
+  --subtitle "Movie pt-BR_sync.srt" \
+  --offset -1.2 \
+  --output "Movie pt-BR_sync_minus1.2s.srt"
+```
+
+Use positive offsets to make subtitles later. Use negative offsets to make them
+earlier.
+
+## Audio Fallback
+
+Use audio sync only when:
+
+- no English subtitle reference exists
+- the English subtitle track is known to be bad
+- the user explicitly asks to try audio
+
+Command pattern:
+
+```sh
+./sync_subtitle_folder.py "/path/to/movie folder" \
+  --subtitle "Movie pt-BR.srt" \
+  --reference-mode audio
+```
+
+## Reporting Checklist
+
+Always include:
+
+- reference used
+- output file
+- exact command
+- whether originals were preserved
+- any offset applied

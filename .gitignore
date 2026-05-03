@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+*_sync.srt
+*_sync_*.srt
+*_engref_sync*.srt
+*_audio_sync*.srt
+*.DS_Store
