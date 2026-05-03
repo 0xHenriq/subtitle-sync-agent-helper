@@ -8,6 +8,10 @@ description: Use when a user asks an agent to sync translated subtitles in a mov
 This is only a thin agent runbook. Use [README.md](README.md) or
 `./sync_subtitle_folder.py --help` for details.
 
+The skill is not the tool. Before running anything, make sure this repo is
+available on the machine and run commands from the repo root, or use the full
+path to `sync_subtitle_folder.py`.
+
 ## Agent Contract
 
 1. Start with a plan:

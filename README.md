@@ -232,10 +232,11 @@ folder                 Folder containing the movie and subtitle.
 
 ## Agent Usage
 
-When asking an agent to run this, point it at [SKILL.md](SKILL.md). The intended
-loop is:
+When asking an agent to run this, point it at [SKILL.md](SKILL.md). Installing
+the skill alone does not install the script; the repo must also be available on
+the machine. The intended loop is:
 
-1. Dry-run the folder.
+1. Run `--doctor --report-json sync_report.json` from the repo root.
 2. Use `--reference-mode subtitle`, which is the default.
 3. Run the sync without overwriting originals.
 4. If the user says it is off, classify constant offset versus drift, bad

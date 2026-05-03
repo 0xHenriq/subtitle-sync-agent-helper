@@ -9,4 +9,5 @@ venv/
 *_sync_*.srt
 *_engref_sync*.srt
 *_audio_sync*.srt
+sync_report*.json
 *.DS_Store

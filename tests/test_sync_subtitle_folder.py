@@ -34,6 +34,16 @@ class SubtitleSyncTests(unittest.TestCase):
                 ["Movie.es.srt", "Movie.pt-BR.srt"],
             )
 
+    def test_explicit_target_subtitle_must_be_srt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Movie.pt-BR.ass").write_text("1\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as raised:
+                sync.find_target_subtitles(folder, explicit="Movie.pt-BR.ass", all_targets=False)
+
+            self.assertIn("Only .srt target", str(raised.exception))
+
     def test_output_path_never_overwrites_without_force(self):
         with tempfile.TemporaryDirectory() as tmp:
             subtitle = Path(tmp) / "Movie.pt-BR.srt"
@@ -52,6 +62,30 @@ class SubtitleSyncTests(unittest.TestCase):
                 sync.make_output_path(subtitle, "_sync", explicit=str(subtitle), force=True)
 
             self.assertIn("different from the original", str(raised.exception))
+
+    def test_output_path_cannot_overwrite_video_or_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            subtitle = folder / "Movie.pt-BR.srt"
+            reference = folder / "Movie.eng.srt"
+            output = folder / "Movie.pt-BR_sync.srt"
+            for path in (video, subtitle, reference):
+                path.write_text("x\n", encoding="utf-8")
+
+            choice = sync.ReferenceChoice(value=str(reference), label="reference")
+
+            for protected in (video, reference):
+                with self.subTest(protected=protected.name):
+                    with self.assertRaises(SystemExit):
+                        sync.validate_output_paths(
+                            video,
+                            [subtitle],
+                            [protected],
+                            choice,
+                        )
+
+            sync.validate_output_paths(video, [subtitle], [output], choice)
 
     def test_report_path_is_folder_relative(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,7 +227,15 @@ class SubtitleSyncTests(unittest.TestCase):
         self.assertIn("--gss", command)
 
     def test_engine_args_cannot_override_wrapper_safety(self):
-        for blocked in ("-i", "-o", "--overwrite-input", "--reference-stream"):
+        blocked_options = (
+            "-i",
+            "-o",
+            "-itarget.srt",
+            "-oout.srt",
+            "--overwrite-input",
+            "--reference-stream",
+        )
+        for blocked in blocked_options:
             with self.subTest(blocked=blocked):
                 with self.assertRaises(SystemExit):
                     sync.validate_engine_args([blocked])

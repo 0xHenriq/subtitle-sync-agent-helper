@@ -102,9 +102,11 @@ def has_engine_option(engine_args: list[str], option: str) -> bool:
 
 def validate_engine_args(engine_args: list[str]) -> None:
     for argument in engine_args:
-        if option_name(argument) in BLOCKED_ENGINE_OPTIONS:
+        name = option_name(argument)
+        blocked = name in BLOCKED_ENGINE_OPTIONS or name.startswith(("-i", "-o"))
+        if blocked:
             raise SystemExit(
-                f"Do not pass {option_name(argument)} through --engine-arg; "
+                f"Do not pass {name} through --engine-arg; "
                 "the wrapper controls inputs, outputs, and reference selection."
             )
 
@@ -166,7 +168,27 @@ def validate_report_path(
         protected_paths.add(Path(reference.value).resolve())
 
     if report_path.resolve() in protected_paths:
-        raise SystemExit("Report JSON path must be different from media and subtitle files.")
+        raise SystemExit(
+            "Report JSON path must be different from media and subtitle files."
+        )
+
+
+def validate_output_paths(
+    video: Path,
+    subtitles: list[Path],
+    outputs: list[Path],
+    reference: ReferenceChoice,
+) -> None:
+    protected_paths = {video.resolve()}
+    protected_paths.update(subtitle.resolve() for subtitle in subtitles)
+    if not reference.value.startswith("stream:") and reference.value != "audio":
+        protected_paths.add(Path(reference.value).resolve())
+
+    for output in outputs:
+        if output.resolve() in protected_paths:
+            raise SystemExit(
+                "Output subtitle must be different from media and reference files."
+            )
 
 
 def tokens_for(path: Path) -> set[str]:
@@ -229,6 +251,8 @@ def find_target_subtitles(folder: Path, explicit: str | None, all_targets: bool)
     if explicit_path:
         if not explicit_path.exists():
             raise SystemExit(f"Subtitle not found: {explicit_path}")
+        if explicit_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
+            raise SystemExit(f"Only .srt target subtitles are supported: {explicit_path}")
         return [explicit_path]
 
     candidates = subtitle_candidates(folder)
@@ -616,6 +640,7 @@ def main() -> int:
         mode=args.reference_mode,
         explicit_reference=args.reference,
     )
+    validate_output_paths(video, subtitles, outputs, reference)
     report_path = resolve_report_path(folder, args.report_json)
     validate_report_path(report_path, video, subtitles, outputs, reference)
     report = {
